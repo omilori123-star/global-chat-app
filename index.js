@@ -1,55 +1,84 @@
-const express = require("express");
-const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
-const bodyParser = require("body-parser");
+const fs = require("fs");
 
-app.use(express.static("public"));
-app.use(bodyParser.json());
+let users = {};
+let messages = {};
 
-let users = {}; // שמירת משתמשים {username: {password, friends: []}}
-let onlineSockets = {}; // מי מחובר עכשיו
+// טעינה
+if (fs.existsSync("users.json")) users = JSON.parse(fs.readFileSync("users.json"));
+if (fs.existsSync("messages.json")) messages = JSON.parse(fs.readFileSync("messages.json"));
 
-// יצירת משתמש חדש
-app.post("/register", (req, res) => {
-    const { username, password } = req.body;
-    if (users[username]) return res.json({ success: false, msg: "Username exists" });
-    users[username] = { password, friends: [] };
-    res.json({ success: true });
+function saveAll(){
+    fs.writeFileSync("users.json", JSON.stringify(users,null,2));
+    fs.writeFileSync("messages.json", JSON.stringify(messages,null,2));
+}
+
+// register
+app.post("/register",(req,res)=>{
+    const {username,password} = req.body;
+    if(users[username]) return res.json({success:false});
+
+    users[username] = {
+        password,
+        friends:[],
+        avatar:"",
+        displayName:username
+    };
+
+    saveAll();
+    res.json({success:true});
 });
 
-// התחברות
-app.post("/login", (req, res) => {
-    const { username, password } = req.body;
-    if (!users[username] || users[username].password !== password)
-        return res.json({ success: false, msg: "Invalid credentials" });
-    res.json({ success: true });
+// login
+app.post("/login",(req,res)=>{
+    const {username,password} = req.body;
+
+    if(!users[username] || users[username].password !== password)
+        return res.json({success:false});
+
+    res.json({success:true, user:users[username]});
 });
 
-// הוספת חבר
-app.post("/add-friend", (req, res) => {
-    const { myUsername, friendUsername } = req.body;
-    if (!users[friendUsername]) return res.json({ success: false });
-    if (!users[myUsername].friends.includes(friendUsername))
+// update profile
+app.post("/update-profile",(req,res)=>{
+    const {username, displayName, avatar} = req.body;
+
+    if(users[username]){
+        users[username].displayName = displayName;
+        users[username].avatar = avatar;
+        saveAll();
+        res.json({success:true});
+    }
+});
+
+// add friend
+app.post("/add-friend",(req,res)=>{
+    const {myUsername, friendUsername} = req.body;
+
+    if(users[friendUsername]){
         users[myUsername].friends.push(friendUsername);
-    if (!users[friendUsername].friends.includes(myUsername))
         users[friendUsername].friends.push(myUsername);
-    res.json({ success: true });
+        saveAll();
+        res.json({success:true});
+    } else res.json({success:false});
 });
 
-// Socket.io – צ'אט
-io.on("connection", (socket) => {
-    socket.on("register", (username) => {
-        onlineSockets[username] = socket;
+// socket
+io.on("connection",(socket)=>{
+
+    socket.on("register",username=>{
+        socket.username = username;
     });
 
-    socket.on("send-message", ({ to, from, text }) => {
-        if (onlineSockets[to]) onlineSockets[to].emit("receive-message", { from, text });
+    socket.on("send-message",({to,from,text})=>{
+
+        const key = [from,to].sort().join("_");
+
+        if(!messages[key]) messages[key] = [];
+        messages[key].push({from,text});
+
+        saveAll();
+
+        io.emit("receive-message",{to,from,text});
     });
 
-    socket.on("disconnect", () => {
-        for (let u in onlineSockets) if (onlineSockets[u] === socket) delete onlineSockets[u];
-    });
 });
-
-http.listen(3000, () => console.log("Server running on port 3000"));
