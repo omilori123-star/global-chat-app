@@ -2,12 +2,10 @@
 <html lang="he">
 <head>
 <meta charset="UTF-8">
-<title>Global Chat App</title>
+<title>WhatsApp Clone</title>
 <style>
 body{font-family:Arial;background:#f0f0f0;display:flex;justify-content:center;padding-top:30px}
 #container{background:white;padding:20px;border-radius:10px;width:400px;box-shadow:0 0 15px rgba(0,0,0,0.3)}
-h2,h3{text-align:center;color:#333}
-#myId{font-size:24px;color:green;text-align:center;margin-bottom:10px}
 input,button{padding:10px;margin:5px 0;width:100%;box-sizing:border-box;border-radius:5px;border:1px solid #ccc}
 #friendsList{max-height:100px;overflow-y:auto;margin-bottom:10px;border:1px solid #ccc;border-radius:5px;padding:5px}
 .friend{padding:5px;cursor:pointer;border-bottom:1px solid #eee}
@@ -20,44 +18,96 @@ input,button{padding:10px;margin:5px 0;width:100%;box-sizing:border-box;border-r
 </head>
 <body>
 <div id="container">
-<h2>Global Chat App</h2>
-<div id="myId">לא נוצר עדיין</div>
-<button onclick="createUser()">צור משתמש</button>
-<h3>הוסף חבר</h3>
-<input id="friendCode" placeholder="הכנס קוד חבר">
-<button onclick="addFriend()">אישור</button>
-<div id="status"></div>
-<h3>רשימת חברים</h3>
+<h2>WhatsApp Clone</h2>
+
+<div id="loginDiv">
+<h3>Login / Register</h3>
+<input id="username" placeholder="Username">
+<input id="password" type="password" placeholder="Password">
+<button onclick="register()">Register</button>
+<button onclick="login()">Login</button>
+<div id="loginStatus"></div>
+</div>
+
+<div id="chatDiv" style="display:none">
+<h3 id="myName"></h3>
+<input id="friendUsername" placeholder="Add friend by username">
+<button onclick="addFriend()">Add Friend</button>
 <div id="friendsList"></div>
-<h3>צ’אט</h3>
 <div id="chatBox"></div>
-<input id="msg" placeholder="הקלד הודעה">
-<button onclick="sendMessage()">שלח</button>
+<input id="msg" placeholder="Type a message">
+<button onclick="sendMessage()">Send</button>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-let myId="",friends=[],currentFriend="";
-const socket=io(); // Render URL ישתנה בהמשך
+const socket = io();
+let username = "";
+let friends = [];
+let currentFriend = "";
 
-async function createUser(){
-    let res=await fetch("/create-user",{method:"POST"});
-    let data=await res.json();
-    myId=data.id;
-    document.getElementById("myId").innerText=myId;
-    socket.emit("register",myId);
+function register() {
+    const u = document.getElementById("username").value;
+    const p = document.getElementById("password").value;
+    fetch("/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u,password:p})})
+    .then(r=>r.json()).then(data=>{
+        document.getElementById("loginStatus").innerText=data.success?"Registered!":"Username exists";
+    });
 }
-async function addFriend(){
-    let friendId=document.getElementById("friendCode").value;
-    let res=await fetch("/add-friend",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({myId,friendId})});
-    let data=await res.json();
-    if(data.success){document.getElementById("status").innerText="✔ נוסף בהצלחה";friends.push(friendId);renderFriends()}
-    else document.getElementById("status").innerText="❌ קוד לא קיים";
+
+function login() {
+    const u = document.getElementById("username").value;
+    const p = document.getElementById("password").value;
+    fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u,password:p})})
+    .then(r=>r.json()).then(data=>{
+        if(data.success){
+            username=u;
+            document.getElementById("loginDiv").style.display="none";
+            document.getElementById("chatDiv").style.display="block";
+            document.getElementById("myName").innerText=username;
+            socket.emit("register",username);
+        } else document.getElementById("loginStatus").innerText="Wrong credentials";
+    });
 }
-function renderFriends(){const listDiv=document.getElementById("friendsList");listDiv.innerHTML="";friends.forEach(f=>{const div=document.createElement("div");div.className="friend";div.innerText=f;div.onclick=()=>{currentFriend=f;document.getElementById("chatBox").innerHTML=""};listDiv.appendChild(div)})}
-function sendMessage(){if(!currentFriend){alert("בחר חבר");return}const text=document.getElementById("msg").value;if(!text)return;socket.emit("send-message",{to:currentFriend,from:myId,text});appendMessage(text,"fromMe");document.getElementById("msg").value=""}
-function appendMessage(text,cls){const div=document.createElement("div");div.className="message "+cls;div.innerText=text;document.getElementById("chatBox").appendChild(div);div.scrollIntoView()}
-socket.on("receive-message",({from,text})=>{appendMessage(from+": "+text,"fromFriend")});
+
+function addFriend(){
+    const f = document.getElementById("friendUsername").value;
+    fetch("/add-friend",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({myUsername:username,friendUsername:f})})
+    .then(r=>r.json()).then(data=>{
+        if(data.success){friends.push(f);renderFriends();}
+    });
+}
+
+function renderFriends(){
+    const listDiv = document.getElementById("friendsList");
+    listDiv.innerHTML="";
+    friends.forEach(f=>{
+        const div=document.createElement("div");
+        div.className="friend";
+        div.innerText=f;
+        div.onclick=()=>{currentFriend=f;document.getElementById("chatBox").innerHTML="";};
+        listDiv.appendChild(div);
+    });
+}
+
+function sendMessage(){
+    if(!currentFriend) return alert("Select a friend");
+    const text=document.getElementById("msg").value;
+    if(!text) return;
+    socket.emit("send-message",{to:currentFriend,from:username,text});
+    appendMessage(text,"fromMe");
+    document.getElementById("msg").value="";
+}
+
+function appendMessage(text,cls){
+    const div=document.createElement("div");
+    div.className="message "+cls;
+    div.innerText=text;
+    document.getElementById("chatBox").appendChild(div);
+    div.scrollIntoView();
+}
+
+socket.on("receive-message",({from,text})=>{appendMessage(from+": "+text,"fromFriend");});
 </script>
 </body>
 </html>

@@ -1,59 +1,55 @@
 const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-const { v4: uuidv4 } = require("uuid");
-const fs = require("fs");
-const path = require("path");
-
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+const http = require("http").createServer(app);
+const io = require("socket.io")(http);
+const bodyParser = require("body-parser");
 
-app.use(express.json());
 app.use(express.static("public"));
+app.use(bodyParser.json());
 
-// שמירת משתמשים
-const USERS_FILE = path.join(__dirname, "users.json");
-let users = {};
-if(fs.existsSync(USERS_FILE)) users = JSON.parse(fs.readFileSync(USERS_FILE));
-function saveUsers(){ fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2)); }
+let users = {}; // שמירת משתמשים {username: {password, friends: []}}
+let onlineSockets = {}; // מי מחובר עכשיו
 
 // יצירת משתמש חדש
-app.post("/create-user", (req, res) => {
-    const id = uuidv4().slice(0,6).toUpperCase();
-    users[id] = { friends: [], socketId: "" };
-    saveUsers();
-    res.json({ id });
+app.post("/register", (req, res) => {
+    const { username, password } = req.body;
+    if (users[username]) return res.json({ success: false, msg: "Username exists" });
+    users[username] = { password, friends: [] };
+    res.json({ success: true });
+});
+
+// התחברות
+app.post("/login", (req, res) => {
+    const { username, password } = req.body;
+    if (!users[username] || users[username].password !== password)
+        return res.json({ success: false, msg: "Invalid credentials" });
+    res.json({ success: true });
 });
 
 // הוספת חבר
 app.post("/add-friend", (req, res) => {
-    const { myId, friendId } = req.body;
-    if(users[myId] && users[friendId]){
-        if(!users[myId].friends.includes(friendId)) users[myId].friends.push(friendId);
-        if(!users[friendId].friends.includes(myId)) users[friendId].friends.push(myId);
-        saveUsers();
-        res.json({ success: true });
-    } else {
-        res.json({ success: false });
-    }
+    const { myUsername, friendUsername } = req.body;
+    if (!users[friendUsername]) return res.json({ success: false });
+    if (!users[myUsername].friends.includes(friendUsername))
+        users[myUsername].friends.push(friendUsername);
+    if (!users[friendUsername].friends.includes(myUsername))
+        users[friendUsername].friends.push(myUsername);
+    res.json({ success: true });
 });
 
-// Socket.io
-io.on("connection", socket => {
-    socket.on("register", (userId) => {
-        if(users[userId]) users[userId].socketId = socket.id;
-        saveUsers();
+// Socket.io – צ'אט
+io.on("connection", (socket) => {
+    socket.on("register", (username) => {
+        onlineSockets[username] = socket;
     });
+
     socket.on("send-message", ({ to, from, text }) => {
-        const friend = users[to];
-        if(friend && friend.socketId) io.to(friend.socketId).emit("receive-message", { from, text });
+        if (onlineSockets[to]) onlineSockets[to].emit("receive-message", { from, text });
     });
+
     socket.on("disconnect", () => {
-        for(let id in users) if(users[id].socketId===socket.id) users[id].socketId="";
-        saveUsers();
+        for (let u in onlineSockets) if (onlineSockets[u] === socket) delete onlineSockets[u];
     });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+http.listen(3000, () => console.log("Server running on port 3000"));
